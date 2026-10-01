@@ -5,6 +5,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { FileUploader } from "@/components/accounting/file-uploader";
 import { DashboardTab } from "@/components/accounting/dashboard-tab";
 import { ComptesAComptesTab } from "@/components/accounting/comptes-a-comptes-tab";
+import { BalanceTab } from "@/components/accounting/balance-tab";
 import { RulesTab } from "@/components/accounting/rules-tab";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -12,6 +13,7 @@ import {
   ArrowLeftRight,
   ScrollText,
   Calculator,
+  Scale,
 } from "lucide-react";
 import type { AnalysisResult } from "@/lib/accounting/engine";
 import { buildExportWorkbook } from "@/lib/accounting/exporter";
@@ -124,7 +126,7 @@ export default function Home() {
           </div>
         ) : (
           <Tabs defaultValue="dashboard" className="w-full">
-            <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 lg:w-fit lg:grid-cols-4">
+            <TabsList className="grid w-full grid-cols-2 sm:grid-cols-5 lg:w-fit lg:grid-cols-5">
               <TabsTrigger value="dashboard" className="gap-2">
                 <LayoutDashboard className="h-4 w-4" />
                 <span className="hidden sm:inline">Tableau de bord</span>
@@ -140,6 +142,19 @@ export default function Home() {
                     className="ml-1 h-5 px-1.5 text-[10px]"
                   >
                     {result.transferStats.aCreer}
+                  </Badge>
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="balance" className="gap-2">
+                <Scale className="h-4 w-4" />
+                <span className="hidden sm:inline">Balance</span>
+                <span className="sm:hidden">Balance</span>
+                {result.balance && !result.balance.isBalanced && (
+                  <Badge
+                    variant="destructive"
+                    className="ml-1 h-5 px-1.5 text-[10px]"
+                  >
+                    !
                   </Badge>
                 )}
               </TabsTrigger>
@@ -164,6 +179,9 @@ export default function Home() {
                 onExport={handleExport}
                 exporting={exporting}
               />
+            </TabsContent>
+            <TabsContent value="balance" className="mt-4">
+              <BalanceTab result={result} />
             </TabsContent>
             <TabsContent value="rules" className="mt-4">
               <RulesTab />

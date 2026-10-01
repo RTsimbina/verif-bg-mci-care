@@ -15,6 +15,8 @@ import {
   ParsedBrouillardData,
   BrouillardEntry,
   ExistingTransfer,
+  BalanceAccount,
+  BalanceCategory,
 } from "./parser";
 import {
   GROUPED_ENTITIES,
@@ -97,6 +99,65 @@ export interface AnalysisResult {
     montantTotal: number;
   };
   unmatchedEcarts: EntityAnalysis[]; // écarts qu'on n'a pas pu apparier
+  balance: BalanceAnalysis;          // analyse de la balance des comptes
+}
+
+// ---------------------------------------------------------------------------
+// Analyse de la Balance des comptes
+// ---------------------------------------------------------------------------
+
+export interface BalanceAnalysis {
+  periodeDu: string | null;
+  periodeAu: string | null;
+  totalAccounts: number;
+  // Équilibre officiel (extrait des totaux Sage)
+  totalBilanDebit: number;
+  totalBilanCredit: number;
+  totalGestionDebit: number;
+  totalGestionCredit: number;
+  totalBalanceDebit: number;
+  totalBalanceCredit: number;
+  ecartTotal: number;                // totalBalanceDebit - totalBalanceCredit
+  isBalanced: boolean;
+  // Équilibre recalculé (somme des comptes)
+  computedDebit: number;
+  computedCredit: number;
+  computedSoldeDebit: number;
+  computedSoldeCredit: number;
+  ecartComputed: number;             // computedDebit - computedCredit
+  ecartSoldes: number;               // computedSoldeDebit - computedSoldeCredit
+  coherenceWithSage: boolean;        // écart recalculé ≈ écart Sage
+  // Comparaison balance vs brouillard
+  comparison: BalanceBrouillardComparison[];
+  // Synthèse par catégorie
+  byCategory: BalanceCategorySummary[];
+  // Comptes 512 spécifiquement (utiles pour la vérification)
+  accounts512: BalanceAccount[];
+}
+
+export interface BalanceBrouillardComparison {
+  compte: string;
+  intitule: string;
+  balanceDebit: number;
+  balanceCredit: number;
+  balanceSolde: number;        // débit - crédit
+  brouillardDebit: number;
+  brouillardCredit: number;
+  brouillardSolde: number;
+  ecartDebit: number;          // balance - brouillard
+  ecartCredit: number;
+  ecartSolde: number;
+  isCoherent: boolean;         // écart solde < 1 MGA
+}
+
+export interface BalanceCategorySummary {
+  category: BalanceCategory;
+  label: string;
+  count: number;
+  totalDebit: number;
+  totalCredit: number;
+  soldeDebit: number;
+  soldeCredit: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -385,6 +446,131 @@ export function analyze(
     transfers,
     transferStats,
     unmatchedEcarts: unmatched,
+    balance: analyzeBalance(verif, brouillard),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Analyse de la Balance des comptes
+// ---------------------------------------------------------------------------
+
+const CATEGORY_LABELS: Record<BalanceCategory, string> = {
+  CAPITAUX: "Capitaux (classe 1)",
+  IMMOBILISATIONS: "Immobilisations (classe 2)",
+  STOCKS: "Stocks (classe 3)",
+  TIERS: "Tiers (classe 4)",
+  FINANCIER: "Financier (classe 5 — dont 512, 513, 580)",
+  CHARGES: "Charges (classe 6)",
+  PRODUITS: "Produits (classe 7)",
+  AUTRE: "Autre",
+};
+
+function analyzeBalance(
+  verif: ParsedVerifData,
+  brouillard: ParsedBrouillardData
+): BalanceAnalysis {
+  const bal = verif.balance;
+
+  // 1. Synthèse par catégorie
+  const catMap = new Map<BalanceCategory, BalanceCategorySummary>();
+  for (const acc of bal.accounts) {
+    if (!catMap.has(acc.category)) {
+      catMap.set(acc.category, {
+        category: acc.category,
+        label: CATEGORY_LABELS[acc.category],
+        count: 0,
+        totalDebit: 0,
+        totalCredit: 0,
+        soldeDebit: 0,
+        soldeCredit: 0,
+      });
+    }
+    const c = catMap.get(acc.category)!;
+    c.count++;
+    c.totalDebit += acc.mvtDebit;
+    c.totalCredit += acc.mvtCredit;
+    c.soldeDebit += acc.soldeDebit;
+    c.soldeCredit += acc.soldeCredit;
+  }
+  // Round les totaux
+  const byCategory: BalanceCategorySummary[] = Array.from(catMap.values()).map((c) => ({
+    ...c,
+    totalDebit: round(c.totalDebit),
+    totalCredit: round(c.totalCredit),
+    soldeDebit: round(c.soldeDebit),
+    soldeCredit: round(c.soldeCredit),
+  }));
+  byCategory.sort((a, b) => a.category.localeCompare(b.category));
+
+  // 2. Comparaison balance vs brouillard pour chaque compte présent dans la balance
+  // On ne compare que les comptes qui ont un mouvement dans la balance ET dans le brouillard.
+  // Pour les autres, on garde juste les infos de la balance.
+  const brouillardByCompte = new Map<
+    string,
+    { debit: number; credit: number }
+  >();
+  for (const e of brouillard.entries) {
+    if (!e.compteGeneral) continue;
+    const cur = brouillardByCompte.get(e.compteGeneral) || { debit: 0, credit: 0 };
+    cur.debit += e.debit;
+    cur.credit += e.credit;
+    brouillardByCompte.set(e.compteGeneral, cur);
+  }
+
+  const comparison: BalanceBrouillardComparison[] = bal.accounts.map((acc) => {
+    const brou = brouillardByCompte.get(acc.compte) || { debit: 0, credit: 0 };
+    const balanceSolde = acc.mvtDebit - acc.mvtCredit;
+    const brouillardSolde = brou.debit - brou.credit;
+    const ecartSolde = balanceSolde - brouillardSolde;
+    return {
+      compte: acc.compte,
+      intitule: acc.intitule,
+      balanceDebit: round(acc.mvtDebit),
+      balanceCredit: round(acc.mvtCredit),
+      balanceSolde: round(balanceSolde),
+      brouillardDebit: round(brou.debit),
+      brouillardCredit: round(brou.credit),
+      brouillardSolde: round(brouillardSolde),
+      ecartDebit: round(acc.mvtDebit - brou.debit),
+      ecartCredit: round(acc.mvtCredit - brou.credit),
+      ecartSolde: round(ecartSolde),
+      isCoherent: Math.abs(ecartSolde) < 1,
+    };
+  });
+  // Trier par écart absolu décroissant (les plus gros écarts en premier)
+  comparison.sort((a, b) => Math.abs(b.ecartSolde) - Math.abs(a.ecartSolde));
+
+  // 3. Comptes 512 spécifiquement
+  const accounts512 = bal.accounts
+    .filter((a) => a.compte.startsWith("512") || a.compte.startsWith("513"))
+    .sort((a, b) => a.compte.localeCompare(b.compte));
+
+  return {
+    periodeDu: bal.periodeDu,
+    periodeAu: bal.periodeAu,
+    totalAccounts: bal.accounts.length,
+    totalBilanDebit: round(bal.totalBilanDebit),
+    totalBilanCredit: round(bal.totalBilanCredit),
+    totalGestionDebit: round(bal.totalGestionDebit),
+    totalGestionCredit: round(bal.totalGestionCredit),
+    totalBalanceDebit: round(bal.totalBalanceDebit),
+    totalBalanceCredit: round(bal.totalBalanceCredit),
+    ecartTotal: round(bal.totalBalanceDebit - bal.totalBalanceCredit),
+    isBalanced: bal.isBalanced,
+    computedDebit: round(bal.computedDebit),
+    computedCredit: round(bal.computedCredit),
+    computedSoldeDebit: round(bal.computedSoldeDebit),
+    computedSoldeCredit: round(bal.computedSoldeCredit),
+    ecartComputed: round(bal.computedDebit - bal.computedCredit),
+    ecartSoldes: round(bal.computedSoldeDebit - bal.computedSoldeCredit),
+    coherenceWithSage:
+      Math.abs(
+        (bal.computedDebit - bal.computedCredit) -
+        (bal.totalBalanceDebit - bal.totalBalanceCredit)
+      ) < 1,
+    comparison,
+    byCategory,
+    accounts512,
   };
 }
 

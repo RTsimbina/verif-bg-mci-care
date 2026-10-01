@@ -59,6 +59,50 @@ export interface ParsedVerifData {
   entities: VerifEntity[];
   rawRows: any[][];       // toutes les lignes brutes de la feuille "2026"
   sheetNames: string[];
+  balance: ParsedBalance; // feuille "Balance des comptes"
+}
+
+// ---------------------------------------------------------------------------
+// Balance des comptes (feuille "Balance des comptes" de Verif BG.xlsx)
+// ---------------------------------------------------------------------------
+
+export interface BalanceAccount {
+  compte: string;       // ex: "512110"
+  intitule: string;     // ex: "Banque BNI HOLCIM"
+  mvtDebit: number;     // mouvements débit
+  mvtCredit: number;    // mouvements crédit
+  soldeDebit: number;   // solde débiteur
+  soldeCredit: number;  // solde créditeur
+  category: BalanceCategory;
+}
+
+export type BalanceCategory =
+  | "CAPITAUX"        // classe 1
+  | "IMMOBILISATIONS" // classe 2
+  | "STOCKS"          // classe 3
+  | "TIERS"           // classe 4
+  | "FINANCIER"       // classe 5 (dont 512, 513, 580)
+  | "PRODUITS"        // classe 7
+  | "CHARGES"         // classe 6
+  | "AUTRE";
+
+export interface ParsedBalance {
+  accounts: BalanceAccount[];
+  // Totaux officiels (extraits des lignes "Totaux ...")
+  totalBilanDebit: number;
+  totalBilanCredit: number;
+  totalGestionDebit: number;
+  totalGestionCredit: number;
+  totalBalanceDebit: number;
+  totalBalanceCredit: number;
+  // Totaux recalculés (somme des comptes)
+  computedDebit: number;
+  computedCredit: number;
+  computedSoldeDebit: number;
+  computedSoldeCredit: number;
+  isBalanced: boolean; // totalBalanceDebit ≈ totalBalanceCredit
+  periodeDu: string | null;
+  periodeAu: string | null;
 }
 
 export interface ParsedBrouillardData {
@@ -115,6 +159,9 @@ export function parseVerifBG(buffer: ArrayBuffer): ParsedVerifData {
     raw: true,
     defval: null,
   }) as any[][];
+
+  // Parse aussi la balance des comptes
+  const balance = parseBalance(buffer);
 
   const entities: VerifEntity[] = [];
   let currentEntity: VerifEntity | null = null;
@@ -185,6 +232,7 @@ export function parseVerifBG(buffer: ArrayBuffer): ParsedVerifData {
     entities,
     rawRows: rows,
     sheetNames: wb.SheetNames,
+    balance,
   };
 }
 
@@ -194,6 +242,138 @@ function categorizeAccount(compte: string): VerifAccount["category"] {
   if (compte.startsWith("467")) return "PAIEMENT_PRESTATAIRE";
   if (compte.startsWith("512") || compte.startsWith("513")) return "TRESORERIE";
   return "AUTRE";
+}
+
+function categorizeBalanceAccount(compte: string): BalanceCategory {
+  if (!compte) return "AUTRE";
+  const first = compte[0];
+  if (first === "1") return "CAPITAUX";
+  if (first === "2") return "IMMOBILISATIONS";
+  if (first === "3") return "STOCKS";
+  if (first === "4") return "TIERS";
+  if (first === "5") return "FINANCIER";
+  if (first === "6") return "CHARGES";
+  if (first === "7") return "PRODUITS";
+  return "AUTRE";
+}
+
+// ---------------------------------------------------------------------------
+// Parser de la Balance des comptes
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse la feuille "Balance des comptes" de Verif BG.xlsx.
+ *
+ * Structure observée (Sage 100cloud) :
+ *  - Header sur les 11 premières lignes (titre, période, headers colonnes)
+ *  - À partir de la ligne 13 : une ligne par compte avec :
+ *      col 0 : N° compte (ex: "512110")
+ *      col 4 : Intitulé du compte
+ *      col 9 : Mouvements Débit
+ *      col 11 : Mouvements Crédit
+ *      col 14 : Soldes Débit
+ *      col 16 : Soldes Crédit
+ *  - Lignes "Totaux comptes de bilan", "Totaux comptes de gestion",
+ *    "Totaux de la balance" à la fin (intitulé en col 6)
+ */
+export function parseBalance(buffer: ArrayBuffer): ParsedBalance {
+  const wb = XLSX.read(buffer, { type: "array", cellDates: true });
+  const sheetName = wb.SheetNames.includes("Balance des comptes")
+    ? "Balance des comptes"
+    : wb.SheetNames[0];
+  const ws = wb.Sheets[sheetName];
+  const rows: any[][] = XLSX.utils.sheet_to_json(ws, {
+    header: 1,
+    raw: true,
+    defval: null,
+  }) as any[][];
+
+  const accounts: BalanceAccount[] = [];
+  let periodeDu: string | null = null;
+  let periodeAu: string | null = null;
+  let totalBilanDebit = 0;
+  let totalBilanCredit = 0;
+  let totalGestionDebit = 0;
+  let totalGestionCredit = 0;
+  let totalBalanceDebit = 0;
+  let totalBalanceCredit = 0;
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i] || [];
+    const c0 = str(row[0]);
+    const c2 = str(row[2]);
+    const c4 = str(row[4]);
+    const c6 = str(row[6]);
+    // Colonnes réelles (observées sur le fichier Sage 100cloud) :
+    //   col 9  : Mvt Débit
+    //   col 12 : Mvt Crédit
+    //   col 14 : Solde Débit
+    //   col 17 : Solde Crédit
+    const c9 = num(row[9]);
+    const c12 = num(row[12]);
+    const c14 = num(row[14]);
+    const c17 = num(row[17]);
+
+    // Période (lignes 2-3, libellé en col 14, valeur en col 15)
+    if (c4 === "Période du" || c4.startsWith("Période")) {
+      periodeDu = str(row[15]) || str(row[14]);
+    }
+    if (c4 === "au") {
+      periodeAu = str(row[15]) || str(row[14]);
+    }
+
+    // Ligne de compte (col 0 = numéro à 6 chiffres)
+    if (/^\d{6}$/.test(c0)) {
+      accounts.push({
+        compte: c0,
+        intitule: c2 || c4, // intitulé en col 2 (Sage) ou col 4 (fallback)
+        mvtDebit: c9,
+        mvtCredit: c12,
+        soldeDebit: c14,
+        soldeCredit: c17,
+        category: categorizeBalanceAccount(c0),
+      });
+      continue;
+    }
+
+    // Lignes de totaux (intitulé en col 6)
+    const totalLabel = c6.toLowerCase();
+    if (totalLabel.includes("totaux comptes de bilan")) {
+      totalBilanDebit = c9;
+      totalBilanCredit = c12;
+    } else if (totalLabel.includes("totaux comptes de gestion")) {
+      totalGestionDebit = c9;
+      totalGestionCredit = c12;
+    } else if (totalLabel.includes("totaux de la balance")) {
+      totalBalanceDebit = c9;
+      totalBalanceCredit = c12;
+    }
+  }
+
+  // Totaux recalculés (somme de tous les comptes)
+  const computedDebit = accounts.reduce((s, a) => s + a.mvtDebit, 0);
+  const computedCredit = accounts.reduce((s, a) => s + a.mvtCredit, 0);
+  const computedSoldeDebit = accounts.reduce((s, a) => s + a.soldeDebit, 0);
+  const computedSoldeCredit = accounts.reduce((s, a) => s + a.soldeCredit, 0);
+
+  const isBalanced = Math.abs(totalBalanceDebit - totalBalanceCredit) < 1;
+
+  return {
+    accounts,
+    totalBilanDebit,
+    totalBilanCredit,
+    totalGestionDebit,
+    totalGestionCredit,
+    totalBalanceDebit,
+    totalBalanceCredit,
+    computedDebit,
+    computedCredit,
+    computedSoldeDebit,
+    computedSoldeCredit,
+    isBalanced,
+    periodeDu,
+    periodeAu,
+  };
 }
 
 // ---------------------------------------------------------------------------

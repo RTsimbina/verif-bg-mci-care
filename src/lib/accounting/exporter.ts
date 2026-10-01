@@ -251,6 +251,104 @@ export function buildExportWorkbook(result: AnalysisResult): ArrayBuffer {
     XLSX.utils.book_append_sheet(wb, ws5, "Écarts manuels");
   }
 
+  // --- Feuille 6 : Balance des comptes (équilibre + comparaison) ---
+  if (result.balance) {
+    const bal = result.balance;
+    const balRows: any[][] = [
+      ["BALANCE DES COMPTES — Équilibre et comparaison avec le brouillard"],
+      [`Période : ${bal.periodeDu || "?"} → ${bal.periodeAu || "?"}`],
+      [`Nombre de comptes : ${bal.totalAccounts}`],
+      [],
+      ["ÉQUILIBRE OFFICIEL (totaux Sage)"],
+      ["", "Total Débit", "Total Crédit", "Écart", "Statut"],
+      [
+        "Comptes de bilan (classes 1-5)",
+        bal.totalBilanDebit,
+        bal.totalBilanCredit,
+        Math.round((bal.totalBilanDebit - bal.totalBilanCredit) * 100) / 100,
+        Math.abs(bal.totalBilanDebit - bal.totalBilanCredit) < 1 ? "Équilibré" : "DÉSÉQUILIBRE",
+      ],
+      [
+        "Comptes de gestion (classes 6-7)",
+        bal.totalGestionDebit,
+        bal.totalGestionCredit,
+        Math.round((bal.totalGestionDebit - bal.totalGestionCredit) * 100) / 100,
+        Math.abs(bal.totalGestionDebit - bal.totalGestionCredit) < 1 ? "Équilibré" : "DÉSÉQUILIBRE",
+      ],
+      [
+        "TOTAUX DE LA BALANCE",
+        bal.totalBalanceDebit,
+        bal.totalBalanceCredit,
+        bal.ecartTotal,
+        bal.isBalanced ? "ÉQUILIBRÉE" : "DÉSÉQUILIBRÉE",
+      ],
+      [],
+      ["RECALCUL (somme des comptes)"],
+      [
+        "Total mouvements",
+        bal.computedDebit,
+        bal.computedCredit,
+        bal.ecartComputed,
+        Math.abs(bal.ecartComputed) < 1 ? "OK" : "ÉCART",
+      ],
+      [
+        "Total soldes",
+        bal.computedSoldeDebit,
+        bal.computedSoldeCredit,
+        bal.ecartSoldes,
+        Math.abs(bal.ecartSoldes) < 1 ? "OK" : "ÉCART",
+      ],
+      [
+        "Cohérence recalcul vs Sage",
+        "",
+        "",
+        "",
+        bal.coherenceWithSage ? "COHÉRENT" : "ÉCART",
+      ],
+      [],
+      ["SYNTHÈSE PAR CATÉGORIE"],
+      ["Catégorie", "Nombre de comptes", "Total Débit", "Total Crédit", "Solde Débiteur", "Solde Créditeur"],
+    ];
+    for (const c of bal.byCategory) {
+      balRows.push([c.label, c.count, c.totalDebit, c.totalCredit, c.soldeDebit, c.soldeCredit]);
+    }
+    balRows.push([]);
+    balRows.push(["COMPARAISON BALANCE VS BROUILLARD (triée par écart absolu décroissant)"]);
+    balRows.push([
+      "N° compte",
+      "Intitulé",
+      "Balance Débit",
+      "Balance Crédit",
+      "Brouillard Débit",
+      "Brouillard Crédit",
+      "Écart Solde",
+      "Cohérent ?",
+    ]);
+    // Top 100 écarts (pour limiter la taille du fichier)
+    const top100 = bal.comparison.slice(0, 100);
+    for (const c of top100) {
+      balRows.push([
+        c.compte,
+        c.intitule,
+        c.balanceDebit,
+        c.balanceCredit,
+        c.brouillardDebit,
+        c.brouillardCredit,
+        c.ecartSolde,
+        c.isCoherent ? "OUI" : "NON",
+      ]);
+    }
+    if (bal.comparison.length > 100) {
+      balRows.push([`... et ${bal.comparison.length - 100} autres comptes (voir l'interface pour la liste complète)`]);
+    }
+    const ws6 = XLSX.utils.aoa_to_sheet(balRows);
+    ws6["!cols"] = [
+      { wch: 35 }, { wch: 18 }, { wch: 20 }, { wch: 20 },
+      { wch: 20 }, { wch: 20 }, { wch: 18 }, { wch: 14 },
+    ];
+    XLSX.utils.book_append_sheet(wb, ws6, "Balance");
+  }
+
   // Write to buffer
   const arr = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
   return arr;
