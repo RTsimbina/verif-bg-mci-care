@@ -14,6 +14,7 @@ import {
   Calculator,
 } from "lucide-react";
 import type { AnalysisResult } from "@/lib/accounting/engine";
+import { buildExportWorkbook } from "@/lib/accounting/exporter";
 
 export default function Home() {
   const [result, setResult] = useState<AnalysisResult | null>(null);
@@ -27,19 +28,12 @@ export default function Home() {
     if (!result) return;
     setExporting(true);
     try {
-      const fd = new FormData();
-      // Re-read files from inputs is not possible here, so we POST the result JSON
-      // instead — but the /api/export endpoint expects files. To keep it simple,
-      // we POST the JSON and let the server regenerate.
-      const res = await fetch("/api/export", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(result),
+      // Génération du fichier Excel côté client (aucun appel serveur)
+      const xlsxBuffer = buildExportWorkbook(result);
+      // xlsxBuffer est un ArrayBuffer — on le convertit en Blob
+      const blob = new Blob([xlsxBuffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       });
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
-      const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;

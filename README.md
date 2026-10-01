@@ -1,5 +1,9 @@
 # Vérification BG — MCI CARE MADAGASCAR
 
+> 🌐 **Application en ligne** : https://rtsimbina.github.io/verif-bg-mci-care/
+>
+> 📦 **Code source** : https://github.com/RTsimbina/verif-bg-mci-care
+
 Application web de **vérification automatique des écritures comptables** et de **génération des écritures de transfert 580001** (comptes à comptes) pour MCI CARE MADAGASCAR.
 
 L'outil analyse le fichier **Verif BG.xlsx** (lignes de vérification par entité) et le **Brouillard 2026.xlsx** (écritures comptables détaillées) pour :
@@ -142,20 +146,50 @@ Sur la page d'accueil :
 
 ---
 
+## 🌐 Déploiement GitHub Pages
+
+L'application est déployée automatiquement sur GitHub Pages à chaque push sur `main`.
+
+**URL** : https://rtsimbina.github.io/verif-bg-mci-care/
+
+### Architecture
+- **100% statique** : parsing Excel et analyse effectués côté client (SheetJS dans le navigateur)
+- **Aucun serveur Node.js requis** — fonctionne sur GitHub Pages (hébergement gratuit)
+- **Workflow GitHub Actions** : `.github/workflows/deploy.yml`
+  1. `bun install` — installe les dépendances
+  2. `bunx next build` — génère l'export statique dans `out/`
+  3. Upload l'artifact
+  4. Déploie sur GitHub Pages
+
+### Configuration
+- `next.config.ts` configure `output: "export"` + `basePath` adapté au nom du repo
+- Les variables `GITHUB_ACTIONS=true` et `GITHUB_REPOSITORY` sont injectées par GitHub Actions
+- `NEXT_PUBLIC_BASE_PATH` est utilisé pour les fetch côté client (ex: démo)
+
+### Activer GitHub Pages (1ère fois)
+1. Allez sur **Settings → Pages** du dépôt
+2. Section **Build and deployment → Source** : sélectionnez **GitHub Actions**
+3. Le workflow se déclenchera automatiquement au prochain push sur `main`
+
+### Déploiement manuel
+- Onglet **Actions** → **Deploy to GitHub Pages** → **Run workflow**
+
+---
+
 ## 📂 Structure du projet
 
 ```
 .
+├── .github/
+│   └── workflows/
+│       └── deploy.yml                # Workflow GitHub Actions (build + déploy)
 ├── src/
 │   ├── app/
-│   │   ├── api/
-│   │   │   ├── analyze/route.ts      # POST /api/analyze (multipart ou JSON)
-│   │   │   └── export/route.ts       # POST /api/export (génère le xlsx)
 │   │   ├── page.tsx                  # Page principale (4 onglets)
 │   │   └── layout.tsx
 │   ├── components/
 │   │   ├── accounting/
-│   │   │   ├── file-uploader.tsx     # Drag & drop des 2 fichiers
+│   │   │   ├── file-uploader.tsx     # Drag & drop + analyse côté client
 │   │   │   ├── dashboard-tab.tsx     # Onglet tableau de bord
 │   │   │   ├── comptes-a-comptes-tab.tsx  # Onglet transferts 580001
 │   │   │   └── rules-tab.tsx         # Onglet règles de gestion
@@ -163,9 +197,12 @@ Sur la page d'accueil :
 │   └── lib/
 │       └── accounting/
 │           ├── rules.ts              # Règles de gestion 512 (codées en dur)
-│           ├── parser.ts             # Parsing Excel (Verif + Brouillard)
+│           ├── parser.ts             # Parsing Excel (côté client, SheetJS)
 │           ├── engine.ts             # Moteur d'analyse + appariement
-│           └── exporter.ts           # Génération Excel d'export
+│           └── exporter.ts           # Génération Excel d'export (côté client)
+├── public/
+│   └── demo-result.json              # Résultat pré-calculé (mode démo)
+├── next.config.ts                    # Config export statique + basePath
 ├── prisma/
 ├── package.json
 └── .env                              # NON commité (variables locales)

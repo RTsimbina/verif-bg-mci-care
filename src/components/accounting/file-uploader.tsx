@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import type { AnalysisResult } from "@/lib/accounting/engine";
+import { parseVerifBG, parseBrouillard } from "@/lib/accounting/parser";
+import { analyze as runAnalysis } from "@/lib/accounting/engine";
 
 interface FileSlotProps {
   label: string;
@@ -88,15 +90,13 @@ export function FileUploader({ onAnalyzed }: Props) {
     setLoading(true);
     setError(null);
     try {
-      const fd = new FormData();
-      fd.append("verif", verif);
-      fd.append("brouillard", brouillard);
-      const res = await fetch("/api/analyze", { method: "POST", body: fd });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: "Erreur inconnue" }));
-        throw new Error(err.error || `HTTP ${res.status}`);
-      }
-      const result: AnalysisResult = await res.json();
+      // Lecture des fichiers côté client
+      const verifBuf = await verif.arrayBuffer();
+      const brouBuf = await brouillard.arrayBuffer();
+      // Parsing + analyse (tout côté client)
+      const verifData = parseVerifBG(verifBuf);
+      const brouData = parseBrouillard(brouBuf);
+      const result = runAnalysis(verifData, brouData);
       onAnalyzed(result);
       toast({
         title: "Analyse terminée",
@@ -195,7 +195,10 @@ export function FileUploader({ onAnalyzed }: Props) {
               setLoading(true);
               setError(null);
               try {
-                const res = await fetch("/demo-result.json");
+                // basePath est géré automatiquement par Next.js via `assetPrefix`/`basePath`
+                // mais pour un fetch manuel, il faut l'ajouter manuellement
+                const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
+                const res = await fetch(`${basePath}/demo-result.json`);
                 if (!res.ok) throw new Error("Demo indisponible");
                 const data: AnalysisResult = await res.json();
                 onAnalyzed(data);
