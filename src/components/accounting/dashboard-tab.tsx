@@ -11,7 +11,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { CheckCircle2, AlertTriangle, XCircle, Search } from "lucide-react";
+import { CheckCircle2, AlertTriangle, XCircle, Search, Scale, BookOpen, FileText, ChevronRight, ChevronDown } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/select";
 import { usePagination } from "@/hooks/use-pagination";
 import { PaginationBar } from "@/components/accounting/pagination-bar";
-import type { AnalysisResult } from "@/lib/accounting/engine";
+import type { AnalysisResult, EntityAnalysis } from "@/lib/accounting/engine";
 
 const fmt = (n: number) =>
   new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 }).format(n || 0);
@@ -38,6 +38,7 @@ type SortKey = "name" | "ecart_abs" | "ecart";
 
 export function DashboardTab({ result }: Props) {
   const { verif, brouillard, transfers, transferStats, unmatchedEcarts } = result;
+  const v = verif; // alias court
 
   // Filtres + tri pour la table des entités
   const [search, setSearch] = useState("");
@@ -100,6 +101,57 @@ export function DashboardTab({ result }: Props) {
           tone="info"
         />
       </div>
+
+      {/* Nouveaux KPIs : 4 contrôles de validation croisée */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <CheckKpi
+          label="Équilibre D = C"
+          okCount={v.equilibreDcOkCount}
+          totalCount={v.entityCount}
+          icon={<Scale className="h-3.5 w-3.5" />}
+        />
+        <CheckKpi
+          label="Cohérence Balance"
+          okCount={v.balanceOkCount}
+          totalCount={v.entityCount}
+          icon={<CheckCircle2 className="h-3.5 w-3.5" />}
+        />
+        <CheckKpi
+          label="Cohérence Brouillard"
+          okCount={v.brouillardOkCount}
+          totalCount={v.entityCount}
+          icon={<BookOpen className="h-3.5 w-3.5" />}
+        />
+        <CheckKpi
+          label="Code journal valide"
+          okCount={v.journalOkCount}
+          totalCount={v.entityCount}
+          icon={<FileText className="h-3.5 w-3.5" />}
+        />
+      </div>
+
+      {/* Statut global des entités */}
+      <Card>
+        <CardContent className="p-4">
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="text-sm font-semibold text-slate-700">
+              Statut global des {v.entityCount} entités :
+            </div>
+            <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">
+              <CheckCircle2 className="mr-1 h-3 w-3" />
+              {v.globalOkCount} OK (4/4 contrôles)
+            </Badge>
+            <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100">
+              <AlertTriangle className="mr-1 h-3 w-3" />
+              {v.globalWarnCount} avertissements (2-3/4)
+            </Badge>
+            <Badge variant="destructive">
+              <XCircle className="mr-1 h-3 w-3" />
+              {v.globalErrorCount} erreurs (0-1/4)
+            </Badge>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Résumé opérations détectées */}
       <Card>
@@ -209,58 +261,29 @@ export function DashboardTab({ result }: Props) {
               <Table>
                 <TableHeader className="bg-slate-50">
                   <TableRow>
+                    <TableHead className="w-[40px]"></TableHead>
                     <TableHead>Entité</TableHead>
-                    <TableHead className="text-right">Solde Appel de fonds</TableHead>
-                    <TableHead className="text-right">Solde Trésorerie</TableHead>
+                    <TableHead className="text-right">Solde Appels</TableHead>
+                    <TableHead className="text-right">Solde Trésor.</TableHead>
                     <TableHead className="text-right">Écart</TableHead>
-                    <TableHead className="text-center">Statut</TableHead>
-                    <TableHead>Compte 512 dédié</TableHead>
-                    <TableHead>Groupe 512</TableHead>
+                    <TableHead className="text-center">D = C</TableHead>
+                    <TableHead className="text-center">Balance</TableHead>
+                    <TableHead className="text-center">Brouillard</TableHead>
+                    <TableHead className="text-center">Journal</TableHead>
+                    <TableHead className="text-center">Global</TableHead>
+                    <TableHead>Compte 512</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {pagination.paginatedItems.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={7} className="h-24 text-center text-sm text-slate-500">
+                      <TableCell colSpan={11} className="h-24 text-center text-sm text-slate-500">
                         Aucune entité ne correspond aux filtres.
                       </TableCell>
                     </TableRow>
                   ) : (
                     pagination.paginatedItems.map((e) => (
-                      <TableRow
-                        key={e.name}
-                        className={e.hasEcart ? "bg-amber-50/40" : ""}
-                      >
-                        <TableCell className="font-medium">{e.name}</TableCell>
-                        <TableCell className="text-right tabular-nums text-slate-600">
-                          {fmt(e.soldeAppelDeFonds)}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums text-slate-600">
-                          {fmt(e.soldeTresorerie)}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums font-semibold">
-                          <span
-                            className={
-                              e.isSolded
-                                ? "text-emerald-700"
-                                : e.ecart > 0
-                                ? "text-amber-700"
-                                : "text-red-700"
-                            }
-                          >
-                            {fmt(e.ecart)}
-                          </span>
-                        </TableCell>
-                        <TableCell className="text-center">
-                          <StatusBadge solded={e.isSolded} severity={e.severity} />
-                        </TableCell>
-                        <TableCell className="font-mono text-xs">
-                          {e.resolved512 || "—"}
-                        </TableCell>
-                        <TableCell className="text-xs text-slate-500">
-                          {e.group512.length > 0 ? e.group512.join(" · ") : "—"}
-                        </TableCell>
-                      </TableRow>
+                      <EntityRow key={e.name} e={e} />
                     ))
                   )}
                 </TableBody>
@@ -363,6 +386,326 @@ function KpiCard({
         <div className="mt-1 text-xs text-slate-500">{subtitle}</div>
       </CardContent>
     </Card>
+  );
+}
+
+function CheckKpi({
+  label,
+  okCount,
+  totalCount,
+  icon,
+}: {
+  label: string;
+  okCount: number;
+  totalCount: number;
+  icon: React.ReactNode;
+}) {
+  const pct = totalCount > 0 ? Math.round((okCount / totalCount) * 100) : 0;
+  const tone = pct === 100 ? "emerald" : pct >= 80 ? "amber" : "red";
+  const toneClasses: Record<string, string> = {
+    emerald: "border-emerald-200 bg-emerald-50/60 text-emerald-800",
+    amber: "border-amber-200 bg-amber-50/60 text-amber-800",
+    red: "border-red-200 bg-red-50/60 text-red-800",
+  };
+  return (
+    <Card className={toneClasses[tone]}>
+      <CardContent className="p-4">
+        <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide">
+          {icon}
+          <span>{label}</span>
+        </div>
+        <div className="mt-1 text-2xl font-bold tabular-nums">
+          {okCount}<span className="text-base font-normal text-slate-500">/{totalCount}</span>
+        </div>
+        <div className="mt-1 text-xs text-slate-600">
+          {pct}% des entités validées
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function EntityRow({ e }: { e: EntityAnalysis }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <>
+      <TableRow
+        className={e.hasEcart ? "bg-amber-50/40 cursor-pointer" : "cursor-pointer hover:bg-slate-50"}
+        onClick={() => setExpanded(!expanded)}
+      >
+        <TableCell className="w-[40px] text-center">
+          {expanded ? (
+            <ChevronDown className="h-4 w-4 text-slate-400" />
+          ) : (
+            <ChevronRight className="h-4 w-4 text-slate-400" />
+          )}
+        </TableCell>
+        <TableCell className="font-medium">{e.name}</TableCell>
+        <TableCell className="text-right tabular-nums text-slate-600 text-xs">
+          {fmt(e.soldeAppelDeFonds)}
+        </TableCell>
+        <TableCell className="text-right tabular-nums text-slate-600 text-xs">
+          {fmt(e.soldeTresorerie)}
+        </TableCell>
+        <TableCell className="text-right tabular-nums font-semibold">
+          <span
+            className={
+              e.isSolded
+                ? "text-emerald-700"
+                : e.ecart > 0
+                ? "text-amber-700"
+                : "text-red-700"
+            }
+          >
+            {fmt(e.ecart)}
+          </span>
+        </TableCell>
+        <TableCell className="text-center">
+          <MiniCheck ok={e.equilibreDcOk} />
+        </TableCell>
+        <TableCell className="text-center">
+          <MiniCheck
+            ok={e.balanceOk}
+            partial={e.balanceEcartCount > 0 && e.balanceCoherentCount > 0}
+            label={`${e.balanceCoherentCount}/${e.balanceByAccount.length}`}
+          />
+        </TableCell>
+        <TableCell className="text-center">
+          <MiniCheck
+            ok={e.brouillardOk}
+            partial={e.brouillardEcartCount > 0 && e.brouillardCoherentCount > 0}
+            label={`${e.brouillardCoherentCount}/${e.brouillardByAccount.length}`}
+          />
+        </TableCell>
+        <TableCell className="text-center">
+          <MiniCheck
+            ok={e.journalOk}
+            label={e.journalCodes.length > 0 ? `${e.journalCodes.length}` : "—"}
+          />
+        </TableCell>
+        <TableCell className="text-center">
+          <GlobalStatusBadge status={e.globalStatus} />
+        </TableCell>
+        <TableCell className="font-mono text-xs">
+          {e.resolved512 || "—"}
+        </TableCell>
+      </TableRow>
+      {expanded && (
+        <TableRow className="bg-slate-50/50">
+          <TableCell colSpan={11} className="p-4">
+            <EntityDetail e={e} />
+          </TableCell>
+        </TableRow>
+      )}
+    </>
+  );
+}
+
+function MiniCheck({
+  ok,
+  partial = false,
+  label,
+}: {
+  ok: boolean;
+  partial?: boolean;
+  label?: string;
+}) {
+  if (ok) {
+    return (
+      <span className="inline-flex items-center gap-1 text-emerald-700">
+        <CheckCircle2 className="h-3.5 w-3.5" />
+        {label && <span className="text-xs tabular-nums">{label}</span>}
+      </span>
+    );
+  }
+  if (partial) {
+    return (
+      <span className="inline-flex items-center gap-1 text-amber-700">
+        <AlertTriangle className="h-3.5 w-3.5" />
+        {label && <span className="text-xs tabular-nums">{label}</span>}
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 text-red-700">
+      <XCircle className="h-3.5 w-3.5" />
+      {label && <span className="text-xs tabular-nums">{label}</span>}
+    </span>
+  );
+}
+
+function GlobalStatusBadge({ status }: { status: "OK" | "WARN" | "ERROR" }) {
+  if (status === "OK") {
+    return (
+      <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">
+        OK
+      </Badge>
+    );
+  }
+  if (status === "WARN") {
+    return (
+      <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100">
+        WARN
+      </Badge>
+    );
+  }
+  return <Badge variant="destructive">ERROR</Badge>;
+}
+
+function EntityDetail({ e }: { e: EntityAnalysis }) {
+  return (
+    <div className="space-y-4">
+      {/* En-tête */}
+      <div className="flex flex-wrap items-center gap-3">
+        <h4 className="text-sm font-bold text-slate-900">{e.name}</h4>
+        <Badge variant="outline" className="text-xs">
+          {e.checksPassed}/{e.checksTotal} contrôles OK
+        </Badge>
+        <GlobalStatusBadge status={e.globalStatus} />
+      </div>
+
+      {/* Les 4 contrôles en cartes */}
+      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+        <CheckCard
+          title="1. Équilibre D = C"
+          ok={e.equilibreDcOk}
+          okLabel="Équilibré"
+          koLabel={`Écart : ${fmt(e.equilibreDcEcart)} MGA`}
+          details={[
+            `Total Débit : ${fmt(e.totalDebit)} MGA`,
+            `Total Crédit : ${fmt(e.totalCredit)} MGA`,
+          ]}
+        />
+        <CheckCard
+          title="2. Cohérence Balance"
+          ok={e.balanceOk}
+          okLabel="Tous comptes cohérents"
+          koLabel={`${e.balanceEcartCount} écart(s) — max ${fmt(e.balanceMaxEcart)} MGA`}
+          details={[
+            `Comptes vérifiés : ${e.balanceByAccount.length}`,
+            `Cohérents : ${e.balanceCoherentCount}`,
+          ]}
+        />
+        <CheckCard
+          title="3. Cohérence Brouillard"
+          ok={e.brouillardOk}
+          okLabel="Tous comptes cohérents"
+          koLabel={`${e.brouillardEcartCount} écart(s) — max ${fmt(e.brouillardMaxEcart)} MGA`}
+          details={[
+            `Comptes vérifiés : ${e.brouillardByAccount.length}`,
+            `Cohérents : ${e.brouillardCoherentCount}`,
+          ]}
+        />
+        <CheckCard
+          title="4. Code journal"
+          ok={e.journalOk}
+          okLabel={`${e.journalCodes.length} journal(aux) trouvé(s)`}
+          koLabel={e.journalExpected.length === 0 ? "Suffixe inconnu" : "Aucun journal attendu trouvé"}
+          details={[
+            `Journaux attendus : ${e.journalExpected.length > 0 ? e.journalExpected.join(", ") : "—"}`,
+            `Journaux présents : ${e.journalCodes.length > 0 ? e.journalCodes.join(", ") : "—"}`,
+            ...(e.journalMissing.length > 0 ? [`Manquants : ${e.journalMissing.join(", ")}`] : []),
+          ]}
+        />
+      </div>
+
+      {/* Détail par compte */}
+      <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
+        <Table>
+          <TableHeader className="bg-slate-100">
+            <TableRow>
+              <TableHead>N° compte</TableHead>
+              <TableHead className="text-right">Solde Verif</TableHead>
+              <TableHead className="text-right">Solde Balance</TableHead>
+              <TableHead className="text-right">Écart Balance</TableHead>
+              <TableHead className="text-right">Solde Brouillard</TableHead>
+              <TableHead className="text-right">Écart Brouillard</TableHead>
+              <TableHead className="text-center">Balance</TableHead>
+              <TableHead className="text-center">Brouillard</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {e.balanceByAccount.map((ac) => (
+              <TableRow key={ac.compte}>
+                <TableCell className="font-mono text-xs font-semibold">{ac.compte}</TableCell>
+                <TableCell className="text-right tabular-nums text-xs">
+                  {fmt(ac.verifSolde)}
+                </TableCell>
+                <TableCell className="text-right tabular-nums text-xs text-slate-600">
+                  {fmt(ac.balanceSolde)}
+                </TableCell>
+                <TableCell className="text-right tabular-nums text-xs">
+                  <span className={ac.isBalanceCoherent ? "text-emerald-700" : "text-red-700"}>
+                    {fmt(ac.ecartBalance)}
+                  </span>
+                </TableCell>
+                <TableCell className="text-right tabular-nums text-xs text-slate-600">
+                  {fmt(ac.brouillardSolde)}
+                </TableCell>
+                <TableCell className="text-right tabular-nums text-xs">
+                  <span className={ac.isBrouillardCoherent ? "text-emerald-700" : "text-red-700"}>
+                    {fmt(ac.ecartBrouillard)}
+                  </span>
+                </TableCell>
+                <TableCell className="text-center">
+                  <MiniCheck ok={ac.isBalanceCoherent} />
+                </TableCell>
+                <TableCell className="text-center">
+                  <MiniCheck ok={ac.isBrouillardCoherent} />
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </div>
+  );
+}
+
+function CheckCard({
+  title,
+  ok,
+  okLabel,
+  koLabel,
+  details,
+}: {
+  title: string;
+  ok: boolean;
+  okLabel: string;
+  koLabel: string;
+  details: string[];
+}) {
+  return (
+    <div
+      className={`rounded-lg border p-3 ${
+        ok
+          ? "border-emerald-200 bg-emerald-50/50"
+          : "border-red-200 bg-red-50/50"
+      }`}
+    >
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-semibold uppercase tracking-wide text-slate-600">
+          {title}
+        </span>
+        {ok ? (
+          <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+        ) : (
+          <XCircle className="h-4 w-4 text-red-600" />
+        )}
+      </div>
+      <div
+        className={`mt-1 text-xs font-medium ${
+          ok ? "text-emerald-700" : "text-red-700"
+        }`}
+      >
+        {ok ? okLabel : koLabel}
+      </div>
+      <ul className="mt-1 space-y-0.5 text-[11px] text-slate-500">
+        {details.map((d, i) => (
+          <li key={i}>{d}</li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

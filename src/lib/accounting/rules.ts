@@ -242,3 +242,78 @@ export const OPERATION_LABELS: Record<OperationType, string> = {
   HONORAIRES: "Honoraires",
   AUTRE: "Autre",
 };
+
+// ---------------------------------------------------------------------------
+// 6. Mapping entité -> codes journaux du brouillard
+//    Les journaux du brouillard suivent la convention :
+//      BNI<suffix>  : journal Banque BNI
+//      BOA<suffix>  : journal Banque BOA
+//      MVO<suffix>  : journal Mobile Money (Mvola)
+//      MVO<MCI>      : journal MCI central
+//    Pour une entité donnée, on retourne la liste de tous les codes journaux
+//    susceptibles de contenir ses écritures (préfixe = suffix d'entité).
+// ---------------------------------------------------------------------------
+
+const JOURNAL_PREFIXES = ["BNI", "BOA", "MVO"];
+
+/**
+ * Retourne tous les codes journaux possibles pour une entité.
+ * Exemples pour "HOLCIM" : ["BNIHOL", "BOAHOL", "MVOHOL", "BNISAN" (via mapping)]
+ *
+ * Pour les entités avec un suffixe à 3 lettres, on génère simplement les
+ * 3 préfixes BNI/BOA/MVO + suffixe. Pour les entités dont le suffixe est
+ * plus long ou différent, on fait un match case-insensitive.
+ */
+export function getEntityJournalCodes(
+  entity: string,
+  availableJournals: string[] = []
+): string[] {
+  const suffix = ENTITY_TO_JOURNAL_SUFFIX[entity.toUpperCase()];
+  if (!suffix) return [];
+  const upper = suffix.toUpperCase();
+  const candidates = JOURNAL_PREFIXES.map((p) => p + upper);
+  if (availableJournals.length === 0) {
+    return candidates;
+  }
+  // Filtrer pour ne garder que les journaux réellement présents
+  const available = new Set(availableJournals.map((j) => j.toUpperCase()));
+  return candidates.filter((c) => available.has(c.toUpperCase()));
+}
+
+/**
+ * Détermine si un code journal appartient à une entité donnée.
+ * Exemple : journalBelongsToEntity("BOAHOL", "HOLCIM") -> true
+ */
+export function journalBelongsToEntity(
+  journal: string,
+  entity: string
+): boolean {
+  if (!journal || !entity) return false;
+  const suffix = ENTITY_TO_JOURNAL_SUFFIX[entity.toUpperCase()];
+  if (!suffix) return false;
+  const j = journal.toUpperCase();
+  const s = suffix.toUpperCase();
+  // Convention : BNI<suffix>, BOA<suffix>, MVO<suffix>
+  return (
+    j === "BNI" + s ||
+    j === "BOA" + s ||
+    j === "MVO" + s ||
+    j.endsWith(s) // fallback : suffix en fin de journal
+  );
+}
+
+/**
+ * Devine l'entité associée à un code journal du brouillard.
+ * Retourne la première entité dont le suffixe matche, ou null.
+ */
+export function guessEntityFromJournal(journal: string): string | null {
+  if (!journal) return null;
+  const j = journal.toUpperCase();
+  for (const [entity, suffix] of Object.entries(ENTITY_TO_JOURNAL_SUFFIX)) {
+    const s = suffix.toUpperCase();
+    if (j === "BNI" + s || j === "BOA" + s || j === "MVO" + s || j.endsWith(s)) {
+      return entity;
+    }
+  }
+  return null;
+}

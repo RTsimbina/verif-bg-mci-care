@@ -28,6 +28,8 @@ import {
   OperationType,
   getEntityGroup,
   shareSame512,
+  getEntityJournalCodes,
+  journalBelongsToEntity,
 } from "./rules";
 
 // ---------------------------------------------------------------------------
@@ -45,6 +47,54 @@ export interface EntityAnalysis {
   resolved512: string | null;     // 512 dédié (si SPECIFIC ou SANLAM)
   hasEcart: boolean;
   severity: "OK" | "MINEUR" | "MAJEUR";
+
+  // --- NOUVEAU : 4 contrôles de validation croisée ---
+
+  // 1. Équilibre Débit = Crédit (tous comptes confondus)
+  totalDebit: number;             // somme des débits (appels + trésorerie)
+  totalCredit: number;            // somme des crédits (appels + trésorerie)
+  equilibreDcEcart: number;       // totalDebit - totalCredit (doit être 0)
+  equilibreDcOk: boolean;
+
+  // 2. Cohérence avec la Balance
+  balanceByAccount: AccountCheck[]; // contrôle par compte (467, 460, 512...)
+  balanceCoherentCount: number;     // nombre de comptes cohérents
+  balanceEcartCount: number;        // nombre de comptes avec écart
+  balanceMaxEcart: number;          // plus grand écart en valeur absolue
+  balanceOk: boolean;               // true si tous les comptes sont cohérents
+
+  // 3. Cohérence avec le Brouillard (mouvements agrégés par compte)
+  brouillardByAccount: AccountCheck[];
+  brouillardCoherentCount: number;
+  brouillardEcartCount: number;
+  brouillardMaxEcart: number;
+  brouillardOk: boolean;
+
+  // 4. Validation du code journal
+  journalCodes: string[];          // journaux trouvés pour cette entité (ex: BOAHOL, MVOHOL)
+  journalExpected: string[];       // journaux attendus (BNI<suffix>, BOA<suffix>, MVO<suffix>)
+  journalFound: boolean;           // au moins 1 journal attendu est présent
+  journalMissing: string[];        // journaux attendus mais absents
+  journalOk: boolean;
+
+  // Score global
+  checksPassed: number;            // nombre de contrôles OK parmi les 4
+  checksTotal: number;             // toujours 4
+  globalStatus: "OK" | "WARN" | "ERROR";
+}
+
+export interface AccountCheck {
+  compte: string;          // ex: "467110"
+  source: "VERIF" | "BALANCE" | "BROUILLARD";
+  verifSolde: number;      // solde selon la feuille 2026 (D-C)
+  balanceSolde: number;    // solde selon la balance (D-C)
+  brouillardSolde: number; // solde selon le brouillard (D-C)
+  brouillardDebit: number;
+  brouillardCredit: number;
+  ecartBalance: number;    // verifSolde - balanceSolde
+  ecartBrouillard: number; // verifSolde - brouillardSolde
+  isBalanceCoherent: boolean;
+  isBrouillardCoherent: boolean;
 }
 
 export interface OperationSummary {
@@ -80,6 +130,14 @@ export interface AnalysisResult {
     soldedCount: number;
     ecartsCount: number;
     totalEcartAbsolu: number;
+    // Agrégats des 4 contrôles
+    equilibreDcOkCount: number;       // entités avec D=C
+    balanceOkCount: number;            // entités cohérentes avec la balance
+    brouillardOkCount: number;         // entités cohérentes avec le brouillard
+    journalOkCount: number;            // entités avec code journal valide
+    globalOkCount: number;             // entités avec 4/4 contrôles OK
+    globalWarnCount: number;           // entités avec 2-3/4 contrôles OK
+    globalErrorCount: number;          // entités avec 0-1/4 contrôles OK
   };
   brouillard: {
     sheetNames: string[];
@@ -221,7 +279,19 @@ export function analyze(
   verif: ParsedVerifData,
   brouillard: ParsedBrouillardData
 ): AnalysisResult {
-  // 1. Analyse des entités Verif
+  // Index de la balance par compte (pour lookup rapide)
+  const balanceByCompte = new Map<string, { mvtDebit: number; mvtCredit: number; soldeDebit: number; soldeCredit: number; intitule: string }>();
+  for (const acc of verif.balance.accounts) {
+    balanceByCompte.set(acc.compte, {
+      mvtDebit: acc.mvtDebit,
+      mvtCredit: acc.mvtCredit,
+      soldeDebit: acc.soldeDebit,
+      soldeCredit: acc.soldeCredit,
+      intitule: acc.intitule,
+    });
+  }
+
+  // 1. Analyse des entités Verif — avec les 4 contrôles de validation
   const entities: EntityAnalysis[] = verif.entities.map((e) => {
     const ecart = round(e.ecart);
     const ecartAbsolu = Math.abs(ecart);
@@ -232,6 +302,93 @@ export function analyze(
     if (!isSolded) {
       severity = ecartAbsolu > 1_000_000 ? "MAJEUR" : "MINEUR";
     }
+
+    // --- Contrôle 1 : Équilibre Débit = Crédit ---
+    // Pour chaque entité, on somme les débits/crédits de tous ses comptes
+    // (appels de fonds + trésorerie) et on vérifie D = C.
+    // Note : les soldes d'appels de fonds et de trésorerie sont opposés,
+    // donc en sommant tous les comptes, D-C doit donner 0 si équilibré.
+    const totalDebit = round(e.totalDebitAppel + e.totalDebitTresorerie);
+    const totalCredit = round(e.totalCreditAppel + e.totalCreditTresorerie);
+    const equilibreDcEcart = round(totalDebit - totalCredit);
+    const equilibreDcOk = Math.abs(equilibreDcEcart) < 1;
+
+    // --- Contrôle 2 & 3 : Cohérence avec Balance et Brouillard ---
+    // Pour chaque compte de l'entité (467xxx, 460xxx, 512xxx...),
+    // on compare le solde de la feuille 2026 avec :
+    //   - le solde de la balance (mvtDebit - mvtCredit)
+    //   - le solde du brouillard (débit - crédit, agrégé tous journaux)
+    const accountChecks: AccountCheck[] = e.accounts.map((acc) => {
+      const verifSolde = round(acc.solde);
+      const bal = balanceByCompte.get(acc.compte);
+      const balanceSolde = bal ? round(bal.mvtDebit - bal.mvtCredit) : 0;
+      const brou = brouillard.byCompte.get(acc.compte);
+      const brouillardDebit = brou ? round(brou.debit) : 0;
+      const brouillardCredit = brou ? round(brou.credit) : 0;
+      const brouillardSolde = round(brouillardDebit - brouillardCredit);
+      const ecartBalance = round(verifSolde - balanceSolde);
+      const ecartBrouillard = round(verifSolde - brouillardSolde);
+      return {
+        compte: acc.compte,
+        source: "VERIF" as const,
+        verifSolde,
+        balanceSolde,
+        brouillardSolde,
+        brouillardDebit,
+        brouillardCredit,
+        ecartBalance,
+        ecartBrouillard,
+        isBalanceCoherent: Math.abs(ecartBalance) < 1,
+        isBrouillardCoherent: Math.abs(ecartBrouillard) < 1,
+      };
+    });
+
+    const balanceCoherentCount = accountChecks.filter((a) => a.isBalanceCoherent).length;
+    const balanceEcartCount = accountChecks.length - balanceCoherentCount;
+    const balanceMaxEcart = accountChecks.reduce(
+      (m, a) => Math.max(m, Math.abs(a.ecartBalance)),
+      0
+    );
+    const balanceOk = balanceEcartCount === 0;
+
+    const brouillardCoherentCount = accountChecks.filter((a) => a.isBrouillardCoherent).length;
+    const brouillardEcartCount = accountChecks.length - brouillardCoherentCount;
+    const brouillardMaxEcart = accountChecks.reduce(
+      (m, a) => Math.max(m, Math.abs(a.ecartBrouillard)),
+      0
+    );
+    const brouillardOk = brouillardEcartCount === 0;
+
+    // --- Contrôle 4 : Validation du code journal ---
+    const journalExpected = getEntityJournalCodes(e.name, brouillard.journalCodes);
+    // Journaux réellement présents dans le brouillard pour cette entité
+    const journalCodes = journalExpected.filter((j) =>
+      brouillard.journalCodes.some((b) => b.toUpperCase() === j.toUpperCase())
+    );
+    const journalMissing = journalExpected.filter(
+      (j) => !brouillard.journalCodes.some((b) => b.toUpperCase() === j.toUpperCase())
+    );
+    const journalFound = journalCodes.length > 0;
+    // OK si au moins 1 journal attendu est présent, ou si l'entité n'a pas
+    // de suffixe défini (auquel cas on ne peut pas valider)
+    const journalOk = journalExpected.length === 0 || journalFound;
+
+    // --- Score global ---
+    let checksPassed = 0;
+    if (equilibreDcOk) checksPassed++;
+    if (balanceOk) checksPassed++;
+    if (brouillardOk) checksPassed++;
+    if (journalOk) checksPassed++;
+
+    let globalStatus: "OK" | "WARN" | "ERROR" = "OK";
+    if (checksPassed === 4) {
+      globalStatus = "OK";
+    } else if (checksPassed >= 2) {
+      globalStatus = "WARN";
+    } else {
+      globalStatus = "ERROR";
+    }
+
     return {
       name: e.name,
       soldeAppelDeFonds: round(e.soldeAppelDeFonds),
@@ -243,6 +400,28 @@ export function analyze(
       resolved512,
       hasEcart: !isSolded,
       severity,
+      totalDebit,
+      totalCredit,
+      equilibreDcEcart,
+      equilibreDcOk,
+      balanceByAccount: accountChecks,
+      balanceCoherentCount,
+      balanceEcartCount,
+      balanceMaxEcart: round(balanceMaxEcart),
+      balanceOk,
+      brouillardByAccount: accountChecks,
+      brouillardCoherentCount,
+      brouillardEcartCount,
+      brouillardMaxEcart: round(brouillardMaxEcart),
+      brouillardOk,
+      journalCodes,
+      journalExpected,
+      journalFound,
+      journalMissing,
+      journalOk,
+      checksPassed,
+      checksTotal: 4,
+      globalStatus,
     };
   });
 
@@ -433,6 +612,13 @@ export function analyze(
       soldedCount,
       ecartsCount: ecartsEntities.length,
       totalEcartAbsolu,
+      equilibreDcOkCount: entities.filter((e) => e.equilibreDcOk).length,
+      balanceOkCount: entities.filter((e) => e.balanceOk).length,
+      brouillardOkCount: entities.filter((e) => e.brouillardOk).length,
+      journalOkCount: entities.filter((e) => e.journalOk).length,
+      globalOkCount: entities.filter((e) => e.globalStatus === "OK").length,
+      globalWarnCount: entities.filter((e) => e.globalStatus === "WARN").length,
+      globalErrorCount: entities.filter((e) => e.globalStatus === "ERROR").length,
     },
     brouillard: {
       sheetNames: brouillard.sheetNames,

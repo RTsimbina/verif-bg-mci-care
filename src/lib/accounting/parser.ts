@@ -18,6 +18,11 @@ export interface VerifEntity {
   soldeTresorerie: number;   // "Solde Trésorerie" (total 512+513)
   ecart: number;             // ligne "Vérification" (doit être 0 si soldé)
   rowIndex: number;          // ligne de la ligne "Vérification" dans la feuille
+  // Totaux de la ligne "Solde Appel de fonds" et "Solde Trésorerie"
+  totalDebitAppel: number;   // débit total des comptes d'appel de fonds
+  totalCreditAppel: number;  // crédit total des comptes d'appel de fonds
+  totalDebitTresorerie: number;   // débit total des comptes de trésorerie
+  totalCreditTresorerie: number;  // crédit total des comptes de trésorerie
 }
 
 export interface VerifAccount {
@@ -112,6 +117,13 @@ export interface ParsedBrouillardData {
   totalDebit580: number;
   totalCredit580: number;
   sheetNames: string[];
+  // Agrégats par compte et par journal (pour la validation croisée)
+  byCompte: Map<string, { debit: number; credit: number; count: number }>;
+  byJournal: Map<string, { debit: number; credit: number; count: number }>;
+  byCompteAndJournal: Map<string, { debit: number; credit: number; count: number }>;
+  journalCodes: string[];                // liste distincte des codes journaux
+  totalDebit: number;                    // total débit du brouillard
+  totalCredit: number;                   // total crédit du brouillard
 }
 
 // ---------------------------------------------------------------------------
@@ -186,6 +198,10 @@ export function parseVerifBG(buffer: ArrayBuffer): ParsedVerifData {
         soldeTresorerie: 0,
         ecart: 0,
         rowIndex: i,
+        totalDebitAppel: 0,
+        totalCreditAppel: 0,
+        totalDebitTresorerie: 0,
+        totalCreditTresorerie: 0,
       };
       continue;
     }
@@ -194,10 +210,14 @@ export function parseVerifBG(buffer: ArrayBuffer): ParsedVerifData {
     // Lignes "Solde Appel de fonds" / "Solde Trésorerie" / "Vérification"
     if (c1 === "Solde Appel de fonds") {
       currentEntity.soldeAppelDeFonds = c4;
+      currentEntity.totalDebitAppel = c2;
+      currentEntity.totalCreditAppel = c3;
       continue;
     }
     if (c1 === "Solde Trésorerie") {
       currentEntity.soldeTresorerie = c4;
+      currentEntity.totalDebitTresorerie = c2;
+      currentEntity.totalCreditTresorerie = c3;
       continue;
     }
     if (c1 === "Vérification") {
@@ -396,8 +416,15 @@ export function parseBrouillard(buffer: ArrayBuffer): ParsedBrouillardData {
   const entries: BrouillardEntry[] = [];
   const existingTransfers: ExistingTransfer[] = [];
   const accounts512Set = new Set<string>();
+  const journalSet = new Set<string>();
   let totalDebit580 = 0;
   let totalCredit580 = 0;
+  let totalDebit = 0;
+  let totalCredit = 0;
+  // Agrégats : par compte, par journal, par (compte+journal)
+  const byCompte = new Map<string, { debit: number; credit: number; count: number }>();
+  const byJournal = new Map<string, { debit: number; credit: number; count: number }>();
+  const byCompteAndJournal = new Map<string, { debit: number; credit: number; count: number }>();
 
   for (let i = 1; i < rows.length; i++) {
     const row = rows[i] || [];
@@ -432,6 +459,33 @@ export function parseBrouillard(buffer: ArrayBuffer): ParsedBrouillardData {
     };
     entries.push(entry);
 
+    // Agrégats
+    totalDebit += debit;
+    totalCredit += credit;
+    if (compteGeneral) {
+      const cur = byCompte.get(compteGeneral) || { debit: 0, credit: 0, count: 0 };
+      cur.debit += debit;
+      cur.credit += credit;
+      cur.count += 1;
+      byCompte.set(compteGeneral, cur);
+    }
+    if (codeJournal) {
+      journalSet.add(codeJournal);
+      const cur = byJournal.get(codeJournal) || { debit: 0, credit: 0, count: 0 };
+      cur.debit += debit;
+      cur.credit += credit;
+      cur.count += 1;
+      byJournal.set(codeJournal, cur);
+    }
+    if (compteGeneral && codeJournal) {
+      const key = `${compteGeneral}|${codeJournal}`;
+      const cur = byCompteAndJournal.get(key) || { debit: 0, credit: 0, count: 0 };
+      cur.debit += debit;
+      cur.credit += credit;
+      cur.count += 1;
+      byCompteAndJournal.set(key, cur);
+    }
+
     if (compteGeneral.startsWith("512")) {
       accounts512Set.add(compteGeneral);
     }
@@ -462,5 +516,11 @@ export function parseBrouillard(buffer: ArrayBuffer): ParsedBrouillardData {
     totalDebit580,
     totalCredit580,
     sheetNames: wb.SheetNames,
+    byCompte,
+    byJournal,
+    byCompteAndJournal,
+    journalCodes: Array.from(journalSet).sort(),
+    totalDebit,
+    totalCredit,
   };
 }
