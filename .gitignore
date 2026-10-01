@@ -52,3 +52,13 @@ prompt
 server.log
 # Skills directory
 /skills/
+
+# Données comptables sensibles (fichiers sources Excel)
+/upload/
+# Sorties d'analyse locales
+/scripts/analyze_result.json
+/scripts/*.png
+
+# Artefacts de build locaux
+/.zscripts/dev.pid
+/db/*.db
