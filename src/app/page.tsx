@@ -6,6 +6,7 @@ import { FileUploader } from "@/components/accounting/file-uploader";
 import { DashboardTab } from "@/components/accounting/dashboard-tab";
 import { ComptesAComptesTab } from "@/components/accounting/comptes-a-comptes-tab";
 import { BalanceTab } from "@/components/accounting/balance-tab";
+import { AnomaliesTab } from "@/components/accounting/anomalies-tab";
 import { RulesTab } from "@/components/accounting/rules-tab";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -14,6 +15,7 @@ import {
   ScrollText,
   Calculator,
   Scale,
+  AlertCircle,
 } from "lucide-react";
 import type { AnalysisResult } from "@/lib/accounting/engine";
 import { buildExportWorkbook } from "@/lib/accounting/exporter";
@@ -126,7 +128,7 @@ export default function Home() {
           </div>
         ) : (
           <Tabs defaultValue="dashboard" className="w-full">
-            <TabsList className="grid w-full grid-cols-2 sm:grid-cols-5 lg:w-fit lg:grid-cols-5">
+            <TabsList className="grid w-full grid-cols-2 sm:grid-cols-6 lg:w-fit lg:grid-cols-6">
               <TabsTrigger value="dashboard" className="gap-2">
                 <LayoutDashboard className="h-4 w-4" />
                 <span className="hidden sm:inline">Tableau de bord</span>
@@ -142,6 +144,19 @@ export default function Home() {
                     className="ml-1 h-5 px-1.5 text-[10px]"
                   >
                     {result.transferStats.aCreer}
+                  </Badge>
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="anomalies" className="gap-2">
+                <AlertCircle className="h-4 w-4" />
+                <span className="hidden sm:inline">Anomalies</span>
+                <span className="sm:hidden">Anom.</span>
+                {result.anomalyStats && result.anomalyStats.total > 0 && (
+                  <Badge
+                    variant="destructive"
+                    className="ml-1 h-5 px-1.5 text-[10px]"
+                  >
+                    {result.anomalyStats.total > 999 ? "999+" : result.anomalyStats.total}
                   </Badge>
                 )}
               </TabsTrigger>
@@ -179,6 +194,9 @@ export default function Home() {
                 onExport={handleExport}
                 exporting={exporting}
               />
+            </TabsContent>
+            <TabsContent value="anomalies" className="mt-4">
+              <AnomaliesTab result={result} />
             </TabsContent>
             <TabsContent value="balance" className="mt-4">
               <BalanceTab result={result} />

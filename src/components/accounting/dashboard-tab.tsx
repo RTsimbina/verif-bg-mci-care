@@ -74,6 +74,79 @@ export function DashboardTab({ result }: Props) {
 
   return (
     <div className="space-y-6">
+      {/* Bandeau équilibre global prominent */}
+      <Card
+        className={
+          result.brouillardEquilibre.isBalanced
+            ? "border-emerald-300 bg-gradient-to-r from-emerald-50 to-emerald-50/30"
+            : "border-red-300 bg-gradient-to-r from-red-50 to-red-50/30"
+        }
+      >
+        <CardContent className="p-5">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div
+                className={`flex h-12 w-12 items-center justify-center rounded-xl ${
+                  result.brouillardEquilibre.isBalanced
+                    ? "bg-emerald-500 text-white"
+                    : "bg-red-500 text-white"
+                }`}
+              >
+                <Scale className="h-6 w-6" />
+              </div>
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Équilibre comptable global
+                </div>
+                <div className="text-lg font-bold text-slate-900">
+                  {result.brouillardEquilibre.isBalanced
+                    ? "🟢 COMPTABILITÉ ÉQUILIBRÉE"
+                    : "🔴 ÉCART DÉTECTÉ"}
+                </div>
+                <div className="text-xs text-slate-500">
+                  Total Débit = {fmtMGA(result.brouillardEquilibre.totalDebit)} ·{" "}
+                  Total Crédit = {fmtMGA(result.brouillardEquilibre.totalCredit)}
+                  {!result.brouillardEquilibre.isBalanced && (
+                    <span className="font-semibold text-red-700">
+                      {" "}· Écart : {fmt(result.brouillardEquilibre.ecart)} MGA
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-4 text-xs">
+              <div className="text-center">
+                <div className="font-semibold text-slate-600">Pièces</div>
+                <div className="text-lg font-bold tabular-nums">
+                  {result.pieceControls.totalPieces.toLocaleString("fr-FR")}
+                </div>
+                <div className="text-slate-500">
+                  {result.pieceControls.balancedPieces.toLocaleString("fr-FR")} équilibrées
+                </div>
+              </div>
+              <div className="text-center">
+                <div className="font-semibold text-slate-600">Journaux</div>
+                <div className="text-lg font-bold tabular-nums">
+                  {result.journalControls.length}
+                </div>
+                <div className="text-slate-500">
+                  {result.journalControls.filter((j) => j.isBalanced).length} équilibrés
+                </div>
+              </div>
+              <div className="text-center">
+                <div className="font-semibold text-slate-600">Anomalies</div>
+                <div className="text-lg font-bold tabular-nums text-red-700">
+                  {result.anomalyStats.total.toLocaleString("fr-FR")}
+                </div>
+                <div className="text-slate-500">
+                  {result.anomalyStats.critiqueCount} critiques
+                </div>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* KPIs */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <KpiCard

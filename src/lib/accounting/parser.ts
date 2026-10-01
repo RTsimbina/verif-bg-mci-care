@@ -124,6 +124,31 @@ export interface ParsedBrouillardData {
   journalCodes: string[];                // liste distincte des codes journaux
   totalDebit: number;                    // total débit du brouillard
   totalCredit: number;                   // total crédit du brouillard
+  // Agrégat par pièce comptable (clé = journal|numPiece)
+  byPiece: Map<string, BrouillardPiece>;
+}
+
+/**
+ * Représente une pièce comptable = ensemble des lignes d'écriture partageant
+ * le même (codeJournal, numPiece). Une pièce doit être équilibrée :
+ * somme des débits = somme des crédits (anomalie E si ce n'est pas le cas).
+ */
+export interface BrouillardPiece {
+  key: string;             // `${codeJournal}|${numPiece}`
+  codeJournal: string;
+  numPiece: string;
+  date: Date | null;
+  libelle: string;         // libellé de la 1re ligne
+  compteTiers: string;     // compteTiers de la 1re ligne
+  lines: BrouillardEntry[];
+  totalDebit: number;
+  totalCredit: number;
+  ecart: number;           // totalDebit - totalCredit
+  isBalanced: boolean;
+  // Comptes touchés par cette pièce
+  comptes: string[];
+  has512: boolean;         // vrai si la pièce contient un compte 512
+  hasContrepartie: boolean; // vrai si la pièce contient un compte 46x (contrepartie)
 }
 
 // ---------------------------------------------------------------------------
@@ -421,10 +446,11 @@ export function parseBrouillard(buffer: ArrayBuffer): ParsedBrouillardData {
   let totalCredit580 = 0;
   let totalDebit = 0;
   let totalCredit = 0;
-  // Agrégats : par compte, par journal, par (compte+journal)
+  // Agrégats : par compte, par journal, par (compte+journal), par pièce
   const byCompte = new Map<string, { debit: number; credit: number; count: number }>();
   const byJournal = new Map<string, { debit: number; credit: number; count: number }>();
   const byCompteAndJournal = new Map<string, { debit: number; credit: number; count: number }>();
+  const byPiece = new Map<string, BrouillardPiece>();
 
   for (let i = 1; i < rows.length; i++) {
     const row = rows[i] || [];
@@ -485,6 +511,47 @@ export function parseBrouillard(buffer: ArrayBuffer): ParsedBrouillardData {
       cur.count += 1;
       byCompteAndJournal.set(key, cur);
     }
+    // Agrégat par pièce (clé = journal|numPiece)
+    if (codeJournal && numPiece) {
+      const pieceKey = `${codeJournal}|${numPiece}`;
+      let piece = byPiece.get(pieceKey);
+      if (!piece) {
+        piece = {
+          key: pieceKey,
+          codeJournal,
+          numPiece,
+          date,
+          libelle,
+          compteTiers,
+          lines: [],
+          totalDebit: 0,
+          totalCredit: 0,
+          ecart: 0,
+          isBalanced: false,
+          comptes: [],
+          has512: false,
+          hasContrepartie: false,
+        };
+        byPiece.set(pieceKey, piece);
+      }
+      piece.lines.push(entry);
+      piece.totalDebit += debit;
+      piece.totalCredit += credit;
+      if (compteGeneral && !piece.comptes.includes(compteGeneral)) {
+        piece.comptes.push(compteGeneral);
+      }
+      if (compteGeneral.startsWith("512") || compteGeneral.startsWith("513")) {
+        piece.has512 = true;
+      }
+      if (
+        compteGeneral.startsWith("460") ||
+        compteGeneral.startsWith("461") ||
+        compteGeneral.startsWith("462") ||
+        compteGeneral.startsWith("467")
+      ) {
+        piece.hasContrepartie = true;
+      }
+    }
 
     if (compteGeneral.startsWith("512")) {
       accounts512Set.add(compteGeneral);
@@ -509,6 +576,12 @@ export function parseBrouillard(buffer: ArrayBuffer): ParsedBrouillardData {
     }
   }
 
+  // Finalisation des pièces : calculer écart et isBalanced
+  for (const piece of byPiece.values()) {
+    piece.ecart = piece.totalDebit - piece.totalCredit;
+    piece.isBalanced = Math.abs(piece.ecart) < 0.01;
+  }
+
   return {
     entries,
     existingTransfers,
@@ -522,5 +595,6 @@ export function parseBrouillard(buffer: ArrayBuffer): ParsedBrouillardData {
     journalCodes: Array.from(journalSet).sort(),
     totalDebit,
     totalCredit,
+    byPiece,
   };
 }

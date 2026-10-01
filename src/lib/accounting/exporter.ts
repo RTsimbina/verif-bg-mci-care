@@ -349,6 +349,90 @@ export function buildExportWorkbook(result: AnalysisResult): ArrayBuffer {
     XLSX.utils.book_append_sheet(wb, ws6, "Balance");
   }
 
+  // --- Feuille 7 : Anomalies détectées ---
+  if (result.anomalies && result.anomalies.length > 0) {
+    const anomRows: any[][] = [
+      ["ANOMALIES DÉTECTÉES — Moteur de rapprochement"],
+      [`Total : ${result.anomalyStats.total} anomalies (${result.anomalyStats.critiqueCount} critiques, ${result.anomalyStats.majeureCount} majeures, ${result.anomalyStats.mineureCount} mineures)`],
+      [],
+      ["ID", "Type", "Sévérité", "Confiance", "Titre", "Description", "Entité", "Journal", "N° pièce", "Date", "Compte", "Compte tiers", "Montant", "Écart"],
+    ];
+    for (const a of result.anomalies) {
+      anomRows.push([
+        a.id,
+        a.typeLabel,
+        a.severity,
+        a.confidence,
+        a.title,
+        a.description,
+        a.entity || "",
+        a.journal || "",
+        a.numPiece || "",
+        a.date || "",
+        a.compte || "",
+        a.compteTiers || "",
+        a.montant || 0,
+        a.ecart || 0,
+      ]);
+    }
+    anomRows.push([]);
+    anomRows.push(["SYNTHÈSE PAR TYPE"]);
+    anomRows.push(["Type", "Total", "Critiques", "Majeures", "Mineures", "Certaines", "Probables", "Manuelles"]);
+    for (const s of result.anomalySummary) {
+      anomRows.push([
+        s.typeLabel,
+        s.count,
+        s.critiqueCount,
+        s.majeureCount,
+        s.mineureCount,
+        s.certaineCount,
+        s.probableCount,
+        s.manuelleCount,
+      ]);
+    }
+    anomRows.push([]);
+    anomRows.push(["CONTRÔLE PAR JOURNAL"]);
+    anomRows.push(["Code journal", "Entité", "Nb pièces", "Nb lignes", "Total Débit", "Total Crédit", "Écart", "Statut"]);
+    for (const j of result.journalControls) {
+      anomRows.push([
+        j.codeJournal,
+        j.entity || "—",
+        j.piecesCount,
+        j.linesCount,
+        j.totalDebit,
+        j.totalCredit,
+        j.ecart,
+        j.severity,
+      ]);
+    }
+    anomRows.push([]);
+    anomRows.push(["CONTRÔLE PAR PIÈCE"]);
+    anomRows.push([
+      "Total pièces (hors RAN/TIERS)",
+      result.pieceControls.totalPieces,
+      "Équilibrées",
+      result.pieceControls.balancedPieces,
+      "Déséquilibrées",
+      result.pieceControls.unbalancedPieces,
+    ]);
+    anomRows.push([
+      "Total Débit brouillard",
+      result.brouillardEquilibre.totalDebit,
+      "Total Crédit brouillard",
+      result.brouillardEquilibre.totalCredit,
+      "Écart global",
+      result.brouillardEquilibre.ecart,
+      result.brouillardEquilibre.isBalanced ? "ÉQUILIBRÉ" : "DÉSÉQUILIBRÉ",
+    ]);
+    const ws7 = XLSX.utils.aoa_to_sheet(anomRows);
+    ws7["!cols"] = [
+      { wch: 10 }, { wch: 40 }, { wch: 10 }, { wch: 12 }, { wch: 50 },
+      { wch: 70 }, { wch: 20 }, { wch: 12 }, { wch: 14 }, { wch: 12 },
+      { wch: 12 }, { wch: 18 }, { wch: 16 }, { wch: 16 },
+    ];
+    XLSX.utils.book_append_sheet(wb, ws7, "Anomalies");
+  }
+
   // Write to buffer
   const arr = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
   return arr;

@@ -30,7 +30,9 @@ import {
   shareSame512,
   getEntityJournalCodes,
   journalBelongsToEntity,
+  guessEntityFromJournal,
 } from "./rules";
+import { detectAnomalies, Anomaly, AnomalySummary } from "./anomaly-engine";
 
 // ---------------------------------------------------------------------------
 // Types de résultats
@@ -158,6 +160,49 @@ export interface AnalysisResult {
   };
   unmatchedEcarts: EntityAnalysis[]; // écarts qu'on n'a pas pu apparier
   balance: BalanceAnalysis;          // analyse de la balance des comptes
+  // --- NOUVEAU : moteur d'anomalies + contrôle journaux/pièces ---
+  anomalies: Anomaly[];
+  anomalySummary: AnomalySummary[];
+  anomalyStats: {
+    total: number;
+    critiqueCount: number;
+    majeureCount: number;
+    mineureCount: number;
+    infoCount: number;
+    certaineCount: number;
+    probableCount: number;
+    manuelleCount: number;
+  };
+  // Contrôle par journal (anomalie F agrégée)
+  journalControls: JournalControl[];
+  // Contrôle par pièce (anomalie E agrégée)
+  pieceControls: {
+    totalPieces: number;
+    balancedPieces: number;
+    unbalancedPieces: number;
+    totalDebit: number;
+    totalCredit: number;
+    ecart: number;
+  };
+  // Équilibre global Brouillard
+  brouillardEquilibre: {
+    totalDebit: number;
+    totalCredit: number;
+    ecart: number;
+    isBalanced: boolean;
+  };
+}
+
+export interface JournalControl {
+  codeJournal: string;
+  entity: string | null;          // entité associée (devinée)
+  piecesCount: number;            // nombre de pièces distinctes
+  linesCount: number;             // nombre d'écritures
+  totalDebit: number;
+  totalCredit: number;
+  ecart: number;
+  isBalanced: boolean;
+  severity: "OK" | "MINEUR" | "MAJEUR" | "CRITIQUE";
 }
 
 // ---------------------------------------------------------------------------
@@ -633,6 +678,104 @@ export function analyze(
     transferStats,
     unmatchedEcarts: unmatched,
     balance: analyzeBalance(verif, brouillard),
+    // --- Nouveaux contrôles : anomalies + journaux + pièces ---
+    ...detectAnomaliesAndControls(verif, brouillard),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Détection des anomalies + contrôles journaux/pièces
+// ---------------------------------------------------------------------------
+
+function detectAnomaliesAndControls(
+  verif: ParsedVerifData,
+  brouillard: ParsedBrouillardData
+) {
+  // Détection des anomalies (A à H)
+  const { anomalies, summary: anomalySummary } = detectAnomalies(verif, brouillard);
+
+  // Stats agrégées
+  const anomalyStats = {
+    total: anomalies.length,
+    critiqueCount: anomalies.filter((a) => a.severity === "CRITIQUE").length,
+    majeureCount: anomalies.filter((a) => a.severity === "MAJEURE").length,
+    mineureCount: anomalies.filter((a) => a.severity === "MINEURE").length,
+    infoCount: anomalies.filter((a) => a.severity === "INFO").length,
+    certaineCount: anomalies.filter((a) => a.confidence === "CERTAINE").length,
+    probableCount: anomalies.filter((a) => a.confidence === "PROBABLE").length,
+    manuelleCount: anomalies.filter((a) => a.confidence === "MANUELLE").length,
+  };
+
+  // Contrôle par journal (anomalie F agrégée)
+  const journalControls: JournalControl[] = [];
+  for (const [code, agg] of brouillard.byJournal.entries()) {
+    const ecart = round(agg.debit - agg.credit);
+    const isBalanced = Math.abs(ecart) < 1;
+    let severity: JournalControl["severity"] = "OK";
+    if (!isBalanced) {
+      const absEcart = Math.abs(ecart);
+      if (absEcart > 10_000_000) severity = "CRITIQUE";
+      else if (absEcart > 1_000_000) severity = "MAJEUR";
+      else severity = "MINEUR";
+    }
+    // Compter les pièces distinctes pour ce journal
+    let piecesCount = 0;
+    for (const piece of brouillard.byPiece.values()) {
+      if (piece.codeJournal === code) piecesCount++;
+    }
+    journalControls.push({
+      codeJournal: code,
+      entity: guessEntityFromJournal(code),
+      piecesCount,
+      linesCount: agg.count,
+      totalDebit: round(agg.debit),
+      totalCredit: round(agg.credit),
+      ecart,
+      isBalanced,
+      severity,
+    });
+  }
+  // Trier : déséquilibrés d'abord, puis par montant décroissant
+  journalControls.sort((a, b) => {
+    if (a.isBalanced !== b.isBalanced) return a.isBalanced ? 1 : -1;
+    return Math.abs(b.ecart) - Math.abs(a.ecart);
+  });
+
+  // Contrôle par pièce (anomalie E agrégée)
+  // On exclut RAN et TIERS (journaux de centralisation, pas des pièces au sens classique)
+  const EXCLUDED_FOR_PIECES = new Set(["RAN", "TIERS"]);
+  let balancedPieces = 0;
+  let unbalancedPieces = 0;
+  let totalPiecesFiltered = 0;
+  for (const piece of brouillard.byPiece.values()) {
+    if (EXCLUDED_FOR_PIECES.has(piece.codeJournal.toUpperCase())) continue;
+    totalPiecesFiltered++;
+    if (piece.isBalanced) balancedPieces++;
+    else unbalancedPieces++;
+  }
+
+  // Équilibre global du brouillard
+  const brouillardEquilibre = {
+    totalDebit: round(brouillard.totalDebit),
+    totalCredit: round(brouillard.totalCredit),
+    ecart: round(brouillard.totalDebit - brouillard.totalCredit),
+    isBalanced: Math.abs(brouillard.totalDebit - brouillard.totalCredit) < 1,
+  };
+
+  return {
+    anomalies,
+    anomalySummary,
+    anomalyStats,
+    journalControls,
+    pieceControls: {
+      totalPieces: totalPiecesFiltered,
+      balancedPieces,
+      unbalancedPieces,
+      totalDebit: round(brouillard.totalDebit),
+      totalCredit: round(brouillard.totalCredit),
+      ecart: round(brouillard.totalDebit - brouillard.totalCredit),
+    },
+    brouillardEquilibre,
   };
 }
 
