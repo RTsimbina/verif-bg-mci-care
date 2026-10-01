@@ -20,7 +20,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   ArrowRight,
   CheckCircle2,
@@ -30,6 +29,8 @@ import {
   Search,
   ArrowDownUp,
 } from "lucide-react";
+import { usePagination } from "@/hooks/use-pagination";
+import { PaginationBar } from "@/components/accounting/pagination-bar";
 import type { AnalysisResult, ProposedTransfer } from "@/lib/accounting/engine";
 
 const fmt = (n: number) =>
@@ -75,6 +76,8 @@ export function ComptesAComptesTab({ result, onExport, exporting }: Props) {
     });
     return arr;
   }, [transfers, statusFilter, search, sortKey]);
+
+  const pagination = usePagination(filtered, 10);
 
   return (
     <div className="space-y-6">
@@ -164,25 +167,38 @@ export function ComptesAComptesTab({ result, onExport, exporting }: Props) {
                 : "Aucune écriture ne correspond aux filtres."}
             </div>
           ) : (
-            <ScrollArea className="max-h-[640px] rounded-md border">
-              <Table>
-                <TableHeader className="sticky top-0 bg-slate-50">
-                  <TableRow>
-                    <TableHead className="w-[60px]">ID</TableHead>
-                    <TableHead>Flux (émetteur → récepteur)</TableHead>
-                    <TableHead>Comptes 512</TableHead>
-                    <TableHead className="text-right">Montant</TableHead>
-                    <TableHead className="text-center">Statut</TableHead>
-                    <TableHead>Transfert existant</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filtered.map((t) => (
-                    <TransferRow key={t.id} t={t} />
-                  ))}
-                </TableBody>
-              </Table>
-            </ScrollArea>
+            <div className="rounded-md border">
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader className="bg-slate-50">
+                    <TableRow>
+                      <TableHead className="w-[60px]">ID</TableHead>
+                      <TableHead>Flux (émetteur → récepteur)</TableHead>
+                      <TableHead>Comptes 512</TableHead>
+                      <TableHead className="text-right">Montant</TableHead>
+                      <TableHead className="text-center">Statut</TableHead>
+                      <TableHead>Transfert existant</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {pagination.paginatedItems.map((t) => (
+                      <TransferRow key={t.id} t={t} />
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              <PaginationBar
+                page={pagination.page}
+                pageSize={pagination.pageSize}
+                totalPages={pagination.totalPages}
+                totalItems={pagination.totalItems}
+                rangeStart={pagination.rangeStart}
+                rangeEnd={pagination.rangeEnd}
+                onPageChange={pagination.setPage}
+                onPageSizeChange={pagination.setPageSize}
+                itemLabel="transferts"
+              />
+            </div>
           )}
         </CardContent>
       </Card>
