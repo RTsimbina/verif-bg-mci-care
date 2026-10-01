@@ -14,24 +14,21 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Z.ai Code Scaffold - AI-Powered Development",
-  description: "Modern Next.js scaffold optimized for AI-powered development with Z.ai. Built with TypeScript, Tailwind CSS, and shadcn/ui.",
-  keywords: ["Z.ai", "Next.js", "TypeScript", "Tailwind CSS", "shadcn/ui", "AI development", "React"],
-  authors: [{ name: "Z.ai Team" }],
-  icons: {
-    icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
-  },
+  title: "Vérification BG — MCI CARE MADAGASCAR",
+  description: "Détection automatique des écritures comptables incorrectes et génération des écritures de transfert 580001 (comptes à comptes).",
+  keywords: ["comptabilité", "MCI CARE", "Madagascar", "vérification BG", "580001", "comptes à comptes", "512", "brouillard", "Sage"],
+  authors: [{ name: "MCI CARE MADAGASCAR" }],
   openGraph: {
-    title: "Z.ai Code Scaffold",
-    description: "AI-powered development with modern React stack",
-    url: "https://chat.z.ai",
-    siteName: "Z.ai",
+    title: "Vérification BG — MCI CARE MADAGASCAR",
+    description: "Détection automatique des écritures incorrectes et génération des transferts 580001",
+    url: "https://rtsimbina.github.io/verif-bg-mci-care/",
+    siteName: "Vérification BG",
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Z.ai Code Scaffold",
-    description: "AI-powered development with modern React stack",
+    title: "Vérification BG — MCI CARE MADAGASCAR",
+    description: "Détection automatique des écritures incorrectes et génération des transferts 580001",
   },
 };
 
